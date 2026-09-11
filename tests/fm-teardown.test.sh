@@ -657,7 +657,7 @@ make_path_without_lsof() {  # <case-dir>
   local case_dir=$1 path_dir="$1/path-without-lsof" cmd resolved
   mkdir -p "$path_dir"
   for cmd in awk bash basename cat chmod cp cut date dirname env find git grep head hostname id ln \
-    mkdir mktemp mv perl ps readlink realpath rm sed sh sleep sort stat tail timeout tr uname wc xargs; do
+    mkdir mktemp mv perl ps python3 readlink realpath rm sed sh sleep sort stat tail timeout tr uname wc xargs; do
     resolved=$(command -v "$cmd" 2>/dev/null) || continue
     case "$resolved" in /*) ln -sf "$resolved" "$path_dir/$cmd" ;; esac
   done
@@ -1680,6 +1680,55 @@ test_transient_index_lock_clears_after_first_attempt_and_retry_succeeds() {
   pass "transient index.lock cleared after first failed return is retried successfully without force-remove"
 }
 
+
+test_successful_teardown_emits_one_metrics_row() {
+  local case_dir metrics
+  case_dir=$(make_case task-metrics-emission)
+  : > "$case_dir/config/task-metrics"
+  write_meta "$case_dir" local-only ship
+  printf 'done: local work complete\n' > "$case_dir/state/task-x1.status"
+  wt_commit "$case_dir"
+
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "task-metrics-emission: teardown should succeed"
+  metrics="$case_dir/data/task-metrics.jsonl"
+  assert_present "$metrics" "task-metrics-emission: teardown emitted no metrics file"
+  assert_absent "$case_dir/state/task-x1.task-metrics-row" \
+    "task-metrics-emission: successful teardown retained the recovery receipt"
+  python3 - "$metrics" <<'PY'
+import json
+import sys
+
+rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+assert len(rows) == 1, rows
+row = rows[0]
+assert row["task"] == "task-x1", row
+assert row["mode"] == "local-only", row
+assert row["pipeline_runs"] == 0, row
+assert row["fix_rounds"] == 0, row
+assert row["outcome"] == "completed", row
+assert row["merged"] is None, row
+assert row["tokens_consumed"] is None, row
+PY
+  pass "successful teardown emits one honest metrics row before retiring task records"
+}
+
+test_default_off_teardown_skips_metrics_emission() {
+  local case_dir
+  case_dir=$(make_case task-metrics-default-off)
+  write_meta "$case_dir" local-only ship
+  printf 'done: local work complete\n' > "$case_dir/state/task-x1.status"
+  wt_commit "$case_dir"
+
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "task-metrics-default-off: teardown should succeed"
+  assert_absent "$case_dir/data/task-metrics.jsonl" \
+    "task-metrics-default-off: teardown emitted metrics without explicit opt-in"
+  assert_absent "$case_dir/state/task-x1.task-metrics-row" \
+    "task-metrics-default-off: teardown prepared a metrics receipt without opt-in"
+  pass "default-off teardown skips automatic metrics emission"
+}
+
 test_persistent_index_lock_exhausts_retries_and_refuses_loudly() {
   local case_dir rc lock
   case_dir=$(make_case persistent-index-lock)
@@ -1715,6 +1764,8 @@ test_persistent_index_lock_exhausts_retries_and_refuses_loudly() {
   [ -e "$lock" ] || fail "persistent-index-lock: lock file was removed"
   [ -f "$case_dir/state/task-x1.meta" ] \
     || fail "persistent-index-lock: teardown completed despite persistent lock"
+  assert_absent "$case_dir/data/task-metrics.jsonl" \
+    "persistent-index-lock: default-off teardown emitted metrics during a failed cleanup"
   pass "persistent index.lock exhausts retries and refuses without force-removing the lock"
 }
 
@@ -3707,6 +3758,8 @@ test_non_linked_index_lock_path_is_checked_from_worktree
 test_index_lock_mtime_read_failure_refuses
 test_transient_index_lock_clears_after_first_attempt_and_retry_succeeds
 test_persistent_index_lock_exhausts_retries_and_refuses_loudly
+test_successful_teardown_emits_one_metrics_row
+test_default_off_teardown_skips_metrics_emission
 test_empty_retry_wait_uses_default_without_aborting
 test_fractional_legacy_retry_wait_refuses_without_arithmetic_error
 test_parked_own_run_is_aborted_before_teardown
