@@ -540,6 +540,39 @@ The sweep must finish inside `FM_CHECK_TIMEOUT` (default 30), because a run the 
 So a budget larger than that timeout allows is cut down to what fits instead of being refused, and the cut is reported in the report line.
 A budget that is not a whole number from 1 to 120 is still refused outright.
 
+## Frontier knowledge base (frontier-kb)
+
+`bin/fm-kb.sh` is the single operator surface for bounded Postgres search and optional `put` against the shared frontier-kb store.
+It sources the operator env file at `~/.config/frontier-kb/env` (override with `FRONTIER_KB_ENV_FILE` or `FM_KB_ENV_FILE`) without printing secrets, refuses when that file or a DSN is missing after sourcing, and delegates to `scripts/kb_store.py` inside a configured frontier-kb checkout using that checkout's `.venv/bin/python` when present.
+This section is the single owner of the frontier-kb adapter schema; environment values already set in the shell win over the env file, matching the Relay and mail-plane contracts.
+
+Required operator setup lives outside any firstmate home:
+
+```sh
+# ~/.config/frontier-kb/env (mode 0600; never commit or paste the DSN)
+FRONTIER_KB_DSN=   # or DATABASE_URL
+```
+
+Optional per-home gitignored files under `config/`:
+
+```sh
+# config/kb-root — absolute path to the frontier-kb checkout
+# config/kb-writer — KB_WRITER override (example: firstmate-kernel-mbp)
+```
+
+`KB_WRITER` resolves in this order: a value already exported or set in the env file, then `config/kb-writer`, then `firstmate-<short-hostname>`.
+Secondmates use the same `bin/fm-kb.sh` interface and set their own `config/kb-writer` when the default hostname-based id is not enough; the primary propagates only `config/kb-root` through the inherited local-material contract so every home shares one checkout path.
+When `config/kb-root`, `FRONTIER_KB_ROOT`, and `FM_KB_ROOT` are all unset, `fm-kb.sh` probes `$HOME/workspace/frontier-kb` and `$HOME/frontier-kb` before refusing.
+
+Subcommands:
+
+- `search --q <query> [--limit <n>]` runs a bounded search (default limit 20, owned by `kb_store.py`).
+- `put --id <id> --path <path> --title <title> --type <type> [--status <status>] [--body <text>] [--cas <n>]` performs one CAS write.
+- `status` prints the env file path, checkout path, resolved writer, and whether a DSN is configured, never the DSN itself.
+
+The git/Obsidian vault, `ingest`, and `export` remain operator workflows in the frontier-kb checkout; agents use `search`, `get`, and `put` only.
+See the frontier-kb skill (`skills/frontier-kb`) for note types, CAS retry rules, and hosting facts.
+
 ## Mail plane (.env)
 
 The mail plane (bin/fm-mail.sh) reads unseen IMAP messages and sends one SMTP message.
