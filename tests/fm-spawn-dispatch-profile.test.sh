@@ -116,7 +116,8 @@ assert_meta_profile() {
   assert_grep "harness=$harness" "$meta" "meta missing harness=$harness"
   assert_grep "model=$model" "$meta" "meta missing model=$model"
   assert_grep "effort=$effort" "$meta" "meta missing effort=$effort"
-  grep -Eq "^dispatched_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" "$meta" \n    || fail "meta missing its durable UTC dispatch timestamp"
+  grep -Eq '^dispatched_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$meta" \
+    || fail "meta missing its durable UTC dispatch timestamp"
 }
 
 test_no_profile_keeps_claude_profile_defaults() {
